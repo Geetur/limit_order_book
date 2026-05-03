@@ -1,8 +1,10 @@
 #pragma once
+
 #include <vector>
 #include <cstdint>
-#include "lob/core/Order.hpp"
 #include <stdexcept>
+
+#include "lob/core/Order.hpp"
 
 namespace lob::memory {
 
