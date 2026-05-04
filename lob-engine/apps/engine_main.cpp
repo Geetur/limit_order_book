@@ -1,7 +1,12 @@
 #include <iostream>
+#include <thread>
+#include <emmintrin.h>
 #include <lob/memory/slab_allocator.hpp>
 #include <lob/core/OrderBook.hpp>
+#include <lob/concurrency/SPSCQueue.hpp>
 
+
+lob::concurrency::SPSCQueue<int, 1024> lock_free_queue;
 
  void test_OrderPool_build () {
         
@@ -53,10 +58,51 @@ void test_sell_and_buy() {
     std::cout << "\n--- End of Simulation ---\n";
 }
 
+void network_producer_thread() {
+        std::cout << "Producer starting...\n";
+        for (int i = 1; i <= 5; ++i) {
+            // Spin until there is room in the queue
+            while (!lock_free_queue.push(i)) {
+                // CPU relaxes slightly while spinning
+                _mm_pause();
+            }
+            std::cout << "Pushed: " << i << "\n";
+        }
+    }
+    
+void engine_consumer_thread() {
+    std::cout << "Consumer starting...\n";
+    int items_received = 0;
+    int received_value = 0;
+
+    while (items_received < 5) {
+        // Spin infinitely checking for new data (Busy Polling)
+        if (lock_free_queue.pop(received_value)) {
+            std::cout << "          Popped: " << received_value << "\n";
+            items_received++;
+        }
+    }
+}
+
+
 
 int main() {
-    // test_OrderPool_build();
+    test_OrderPool_build();
     test_sell_and_buy();
+
+    // test produces and consumer threads -----
+    std::cout << "--- Lock-Free Queue Test ---\n";
+
+    // Launch threads
+    std::thread producer(network_producer_thread);
+    std::thread consumer(engine_consumer_thread);
+
+    // Wait for them to finish
+    producer.join();
+    consumer.join();
+
+    std::cout << "--- Test Complete ---\n";
+
     return 0;
 
 }
