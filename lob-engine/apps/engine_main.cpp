@@ -4,10 +4,17 @@
 #include <lob/memory/slab_allocator.hpp>
 #include <lob/core/OrderBook.hpp>
 #include <lob/concurrency/SPSCQueue.hpp>
+#include <lob/core/OrderRequest.hpp>
+#include <lob/core/ExecutionReport.hpp>
 
+lob::concurrency::SPSCQueue<lob::core::OrderRequest, 1024> ingress_queue;
+lob::concurrency::SPSCQueue<lob::core::ExecutionReport, 1024> egress_queue;
 
-lob::concurrency::SPSCQueue<int, 1024> lock_free_queue;
+lob::memory::OrderPool pool(1000000);
 
+lob::core::OrderBook book(20000, egress_queue);
+
+// seperate this tests from tests that are threaded
  void test_OrderPool_build () {
         
     std::cout << "building OrderPool with 1,000,000 capacity...\n";
@@ -28,12 +35,11 @@ lob::concurrency::SPSCQueue<int, 1024> lock_free_queue;
 
     pool.deallocate(new_idx);
 };
-
+// seperate this tests from tests that are threaded
 void test_sell_and_buy() {
-    lob::memory::OrderPool pool(1000000);
-    // Create an OrderBook supporting up to $200.00 (represented in cents as 20000)
-    lob::core::OrderBook book(20000); 
 
+    lob::memory::OrderPool pool(1000000);
+    lob::core::OrderBook book(20000, egress_queue);
     std::cout << "--- 1. Submitting Resting Sell Order ---\n";
     uint32_t sell_idx = pool.allocate();
     lob::core::Order& sell_order = pool.get(sell_idx);
@@ -58,28 +64,50 @@ void test_sell_and_buy() {
     std::cout << "\n--- End of Simulation ---\n";
 }
 
-void network_producer_thread() {
-        std::cout << "Producer starting...\n";
-        for (int i = 1; i <= 5; ++i) {
-            // Spin until there is room in the queue
-            while (!lock_free_queue.push(i)) {
-                // CPU relaxes slightly while spinning
-                _mm_pause();
-            }
-            std::cout << "Pushed: " << i << "\n";
+void network_thread() {
+    // Simulate receiving 2 orders from the internet
+    lob::core::OrderRequest sell_req{101, 10050, 100, false};
+    while(!ingress_queue.push(sell_req)) { _mm_pause(); }
+    
+    lob::core::OrderRequest buy_req{102, 10050, 75, true};
+    while(!ingress_queue.push(buy_req)) { _mm_pause(); }
+}
+    
+void engine_thread() {
+    lob::core::OrderRequest incoming_req;
+    int processed = 0;
+
+    // The core loop
+    while (processed < 2) {
+        if (ingress_queue.pop(incoming_req)) {
+            uint32_t new_idx = pool.allocate();
+            lob::core::Order& order = pool.get(new_idx);
+            
+            order.id = incoming_req.order_id;
+            order.price = incoming_req.price;
+            order.quantity = incoming_req.quantity;
+            order.is_buy = incoming_req.is_buy;
+
+            book.add_order(new_idx, pool);
+            processed++;
         }
     }
-    
-void engine_consumer_thread() {
-    std::cout << "Consumer starting...\n";
-    int items_received = 0;
-    int received_value = 0;
+}
 
-    while (items_received < 5) {
-        // Spin infinitely checking for new data (Busy Polling)
-        if (lock_free_queue.pop(received_value)) {
-            std::cout << "          Popped: " << received_value << "\n";
-            items_received++;
+void logger_thread() {
+    lob::core::ExecutionReport report;
+    int reports_received = 0;
+
+    // We expect 1 trade to happen based on our simulated data
+    while (reports_received < 1) {
+        if (egress_queue.pop(report)) {
+            // It is totally fine to use std::cout here because this thread 
+            // is isolated and doesn't care about microsecond latency!
+            std::cout << "[LOGGER] TRADE: Buy Order " << report.buy_id 
+                      << " hit Sell Order " << report.sell_id 
+                      << " for " << report.matched_quantity << " shares @ $" 
+                      << report.matched_price / 100.0 << "\n";
+            reports_received++;
         }
     }
 }
@@ -87,19 +115,21 @@ void engine_consumer_thread() {
 
 
 int main() {
-    test_OrderPool_build();
-    test_sell_and_buy();
+    //test_OrderPool_build();
+    //test_sell_and_buy();
 
     // test produces and consumer threads -----
     std::cout << "--- Lock-Free Queue Test ---\n";
 
     // Launch threads
-    std::thread producer(network_producer_thread);
-    std::thread consumer(engine_consumer_thread);
+    std::thread network(network_thread);
+    std::thread engine(engine_thread);
+    std::thread egress(logger_thread); // egress logger thead
 
     // Wait for them to finish
-    producer.join();
-    consumer.join();
+    network.join();
+    engine.join();
+    egress.join();
 
     std::cout << "--- Test Complete ---\n";
 

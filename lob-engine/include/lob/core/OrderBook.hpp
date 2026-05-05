@@ -4,8 +4,11 @@
 #include <vector>
 #include <algorithm>
 #include <iostream>
+#include <emmintrin.h>
 #include "../core/Order.hpp"
+#include "../core/ExecutionReport.hpp"
 #include "../memory/slab_allocator.hpp"
+#include "../concurrency/SPSCQueue.hpp"
 
 namespace lob::core {
     static constexpr uint32_t NULL_IDX_32 = 0xFFFFFFFF;
@@ -78,10 +81,12 @@ namespace lob::core {
         uint64_t best_bid = 0;
         uint64_t best_ask = 0xFFFFFFFFFFFFFFFF;
         size_t max_ticks;
+        lob::concurrency::SPSCQueue<lob::core::ExecutionReport, 1024>& egress_queue;
 
         public:
 
-            explicit OrderBook(size_t max_price_ticks) : max_ticks(max_price_ticks) {
+            explicit OrderBook(size_t max_price_ticks, lob::concurrency::SPSCQueue<lob::core::ExecutionReport, 1024>& egress_queue) 
+            : max_ticks(max_price_ticks), egress_queue(egress_queue) {
 
                 bids.resize(max_price_ticks);
                 asks.resize(max_price_ticks);
@@ -136,12 +141,17 @@ namespace lob::core {
 
                         resting.quantity -= filled_qty;
                         incoming.quantity -= filled_qty;
-                        // push some sort of report, ideally, to another ring buffer
-                        // but for now, just print
-                        std::cout << "TRADE EXECUTED: Buy Order " << incoming.id
-                              << " matched with Sell Order " << resting.id 
-                              << " for " << filled_qty << " shares @ $" 
-                              << resting.price / 100.0 << "\n";
+                        // push report to egress ring buffer
+                        lob::core::ExecutionReport curr_report;
+                        curr_report.buy_id = incoming.id;
+                        curr_report.sell_id = resting.id;
+                        curr_report.matched_price = resting.price / 100.0;
+                        curr_report.matched_quantity = filled_qty;
+                        // wait to be picked up by egress thread
+                        while (!egress_queue.push(curr_report)) {
+                            _mm_pause();
+                        }
+                        
                         int32_t next_resting_idx = resting.next_order_idx;
                         if (resting.quantity == 0) {
                             // remove from price level
@@ -197,13 +207,16 @@ namespace lob::core {
                         resting.quantity -= filled_qty;
                         incoming.quantity -= filled_qty;
 
-                        // push some sort of report, ideally, to another ring buffer
-                        // but for now, just print
-
-                        std::cout << "TRADE EXECUTED: Sell Order " << incoming.id
-                              << " matched with Buy Order " << resting.id 
-                              << " for " << filled_qty << " shares @ $" 
-                              << resting.price / 100.0 << "\n";
+                        // push report to egress ring buffer
+                        lob::core::ExecutionReport curr_report;
+                        curr_report.sell_id = incoming.id;
+                        curr_report.buy_id = resting.id;
+                        curr_report.matched_price = resting.price / 100.0;
+                        curr_report.matched_quantity = filled_qty;
+                        // wait to be popped by egress thread
+                        while (!egress_queue.push(curr_report)) {
+                            _mm_pause();
+                        }
                         
                         int32_t next_resting_idx = resting.next_order_idx;
 
