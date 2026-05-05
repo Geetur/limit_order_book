@@ -6,6 +6,8 @@
 #include <lob/concurrency/SPSCQueue.hpp>
 #include <lob/core/OrderRequest.hpp>
 #include <lob/core/ExecutionReport.hpp>
+#include <lob/network/gateway.hpp>
+
 
 lob::concurrency::SPSCQueue<lob::core::OrderRequest, 1024> ingress_queue;
 lob::concurrency::SPSCQueue<lob::core::ExecutionReport, 1024> egress_queue;
@@ -65,12 +67,29 @@ void test_sell_and_buy() {
 }
 
 void network_thread() {
-    // Simulate receiving 2 orders from the internet
-    lob::core::OrderRequest sell_req{101, 10050, 100, false};
-    while(!ingress_queue.push(sell_req)) { _mm_pause(); }
+    std::cout << "[NETWORK] Connecting to exchange...\n";
     
-    lob::core::OrderRequest buy_req{102, 10050, 75, true};
-    while(!ingress_queue.push(buy_req)) { _mm_pause(); }
+    // 1. Instantiate the Gateway, giving it the queue
+    lob::network::Gateway gateway(ingress_queue);
+
+    // 2. Simulate a raw byte buffer arriving from the OS network stack
+    std::vector<uint8_t> fake_network_buffer;
+    
+    // manually construct two packed binary messages to simulate a TCP stream
+    lob::network::ExchangePacket p1{'A', 101, 10050, 100, 'S'}; // Sell
+    lob::network::ExchangePacket p2{'A', 102, 10050, 75, 'B'};  // Buy
+
+    // Copy the raw bytes of these structs into our fake network buffer
+    auto* p1_bytes = reinterpret_cast<uint8_t*>(&p1);
+    auto* p2_bytes = reinterpret_cast<uint8_t*>(&p2);
+    
+    fake_network_buffer.insert(fake_network_buffer.end(), p1_bytes, p1_bytes + sizeof(p1));
+    fake_network_buffer.insert(fake_network_buffer.end(), p2_bytes, p2_bytes + sizeof(p2));
+
+    std::cout << "[NETWORK] Buffer of " << fake_network_buffer.size() << " bytes received. Passing to Gateway...\n";
+
+    // 3. BLAST the raw bytes into the Gateway parser
+    gateway.parse_tcp_buffer(fake_network_buffer.data(), fake_network_buffer.size());
 }
     
 void engine_thread() {
