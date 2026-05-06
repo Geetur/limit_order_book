@@ -5,6 +5,8 @@
 namespace lob::network {
 // force compiler to ingest data with absolutely no padding
 // i.e. this struct will always be parsed into 22 bytes
+// this is because if we try to push a padded cpp struct
+// onto unpadded network bytes our data becomes corrupted
 #pragma pack(push, 1)
 // exchange packet describes the 22 bytes of a TCP stream
 // we expect to jump 22 bytes on a stream, ingest, and jump again
