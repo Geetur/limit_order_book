@@ -3,7 +3,7 @@
 #include <cstdint>
 
 namespace lob::core {
-struct  OrderRequest{
+struct OrderRequest{
 
     uint64_t order_id; // 8 byte
     uint64_t price; // 8 byte

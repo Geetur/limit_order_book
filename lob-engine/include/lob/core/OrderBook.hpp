@@ -3,7 +3,6 @@
 #include <cstdint>
 #include <vector>
 #include <algorithm>
-#include <iostream>
 #include <emmintrin.h>
 #include "lob/core/Order.hpp"
 #include "lob/core/ExecutionReport.hpp"
@@ -90,6 +89,8 @@ namespace lob::core {
                         lob::core::ExecutionReport curr_report;
                         curr_report.buy_id = incoming.id;
                         curr_report.sell_id = resting.id;
+                        // realistically, make this a double to avoid losing
+                        // some data
                         curr_report.matched_price = resting.price / 100.0;
                         curr_report.matched_quantity = filled_qty;
                         // wait to be picked up by egress thread
@@ -97,7 +98,7 @@ namespace lob::core {
                             _mm_pause();
                         }
                         
-                        int32_t next_resting_idx = resting.next_order_idx;
+                        uint32_t next_resting_idx = resting.next_order_idx;
                         if (resting.quantity == 0) {
                             // remove from price level
                             ask_level.remove_order(resting_idx, pool);
@@ -119,7 +120,7 @@ namespace lob::core {
             if (incoming.quantity > 0) {
                 bids[incoming.price].append_order(incoming_idx, pool);
                 if (incoming.price > best_ask) {
-                    best_ask = incoming.price;
+                    best_bid = incoming.price;
                 }
             }
             else {
@@ -156,7 +157,9 @@ namespace lob::core {
                         lob::core::ExecutionReport curr_report;
                         curr_report.sell_id = incoming.id;
                         curr_report.buy_id = resting.id;
-                        curr_report.matched_price = resting.price / 100.0;
+                        // log the resting price as in its cent form
+                        // then perform arithmetic at the egress level
+                        curr_report.matched_price = resting.price;
                         curr_report.matched_quantity = filled_qty;
                         // wait to be popped by egress thread
                         while (!egress_queue.push(curr_report)) {

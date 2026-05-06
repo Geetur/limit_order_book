@@ -35,7 +35,7 @@ struct PriceLevel {
 
         Order& order_to_remove = pool.get(order_idx);
         // if node is the start of list remove and ensure next node is head
-        if (order_to_remove.prev_order_idx == NULL_IDX_32) [[unlikely]] {
+        if (order_to_remove.prev_order_idx == NULL_IDX_32) {
             head_idx = order_to_remove.next_order_idx;
         }
         // otherwise, just remove
@@ -43,7 +43,7 @@ struct PriceLevel {
             pool.get(order_to_remove.prev_order_idx).next_order_idx = order_to_remove.next_order_idx;
         }
         // if node is the end of list, remove and ensure previous node is tail
-        if (order_to_remove.next_order_idx == NULL_IDX_32) [[unlikely]] {
+        if (order_to_remove.next_order_idx == NULL_IDX_32) {
             tail_idx = order_to_remove.prev_order_idx;
         }
         // otherwise, just remove
