@@ -14,5 +14,7 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Werror") # Enable all war
 include_directories(include)
 # Create an executable for testing purposes
 add_executable(engine_main apps/engine_main.cpp)
+add_executable(benchmark apps/benchmark_main.cpp)
 #Link POSIX threads for core pinning
 target_link_libraries(engine_main pthread)
+target_link_libraries(benchmark pthread)
