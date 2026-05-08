@@ -125,7 +125,7 @@ namespace lob::core {
                 if (incoming.quantity > 0) {
                     order_map.insert(incoming.id, incoming_idx);
                     bids[incoming.price].append_order(incoming_idx, pool);
-                    if (incoming.price > best_ask) {
+                    if (incoming.price > best_bid) {
                         best_bid = incoming.price;
                     }
                 }
@@ -172,7 +172,7 @@ namespace lob::core {
                             _mm_pause();
                         }
                         
-                        int32_t next_resting_idx = resting.next_order_idx;
+                        uint32_t next_resting_idx = resting.next_order_idx;
 
                         if (resting.quantity == 0) {
                             order_map.remove(resting.id);
