@@ -9,6 +9,7 @@
 #include "lob/core/PriceLevel.hpp"
 #include "lob/memory/slab_allocator.hpp"
 #include "lob/concurrency/SPSCQueue.hpp"
+#include "lob/memory/order_map.hpp"
 
 namespace lob::core {
     static constexpr uint32_t NULL_IDX_32 = 0xFFFFFFFF;
@@ -27,10 +28,13 @@ namespace lob::core {
         size_t max_ticks;
         lob::concurrency::SPSCQueue<lob::core::ExecutionReport, 1024>& egress_queue;
 
+        // each order book has a self contained order map to track order_ids -> order_idxs
+        lob::memory::OrderMap order_map;
+
         public:
 
             explicit OrderBook(size_t max_price_ticks, lob::concurrency::SPSCQueue<lob::core::ExecutionReport, 1024>& egress_queue) 
-            : max_ticks(max_price_ticks), egress_queue(egress_queue) {
+            : max_ticks(max_price_ticks), egress_queue(egress_queue), order_map(4194304) {
 
                 bids.resize(max_price_ticks);
                 asks.resize(max_price_ticks);
@@ -91,7 +95,7 @@ namespace lob::core {
                         curr_report.sell_id = resting.id;
                         // realistically, make this a double to avoid losing
                         // some data
-                        curr_report.matched_price = resting.price / 100.0;
+                        curr_report.matched_price = resting.price;
                         curr_report.matched_quantity = filled_qty;
                         // wait to be picked up by egress thread
                         while (!egress_queue.push(curr_report)) {
@@ -100,6 +104,7 @@ namespace lob::core {
                         
                         uint32_t next_resting_idx = resting.next_order_idx;
                         if (resting.quantity == 0) {
+                            order_map.remove(resting.id);
                             // remove from price level
                             ask_level.remove_order(resting_idx, pool);
                             // return memory
@@ -116,17 +121,18 @@ namespace lob::core {
                 }
             }
                     
-            // if order isn't exhausted rest in its price level
-            if (incoming.quantity > 0) {
-                bids[incoming.price].append_order(incoming_idx, pool);
-                if (incoming.price > best_ask) {
-                    best_bid = incoming.price;
+                // if order isn't exhausted rest in its price level
+                if (incoming.quantity > 0) {
+                    order_map.insert(incoming.id, incoming_idx);
+                    bids[incoming.price].append_order(incoming_idx, pool);
+                    if (incoming.price > best_ask) {
+                        best_bid = incoming.price;
+                    }
                 }
-            }
-            else {
-                pool.deallocate(incoming_idx);
-            }
-            }
+                else {
+                    pool.deallocate(incoming_idx);
+                }
+                }
 
             inline void process_sell(uint32_t incoming_idx, Order& incoming, lob::memory::OrderPool& pool) {
 
@@ -169,6 +175,7 @@ namespace lob::core {
                         int32_t next_resting_idx = resting.next_order_idx;
 
                         if (resting.quantity == 0) {
+                            order_map.remove(resting.id);
                             // remove from price level
                             bid_level.remove_order(resting_idx, pool);
                             // return memory
@@ -190,6 +197,7 @@ namespace lob::core {
                     
                 // if order isn't exhausted rest in its price level
                 if (incoming.quantity > 0) {
+                    order_map.insert(incoming.id, incoming_idx);
                     asks[incoming.price].append_order(incoming_idx, pool);
                     if (incoming.price < best_ask) {
                         best_ask = incoming.price;
@@ -199,5 +207,26 @@ namespace lob::core {
                     pool.deallocate(incoming_idx);
             }
         }
+    inline void process_remove(uint64_t order_id, lob::memory::OrderPool& pool) {
+
+        uint32_t to_remove_idx = order_map.get(order_id);
+
+        // dosent exist
+        if (to_remove_idx == NULL_IDX_32) {
+            return;
+        }
+
+        Order& to_remove_order = pool.get(to_remove_idx);
+        if (to_remove_order.is_buy) {
+            bids[to_remove_order.price].remove_order(to_remove_idx, pool);
+        }
+        else {
+            asks[to_remove_order.price].remove_order(to_remove_idx, pool);
+        }
+
+        order_map.remove(to_remove_order.id);
+        pool.deallocate(to_remove_idx);
+
+    }
     };
 }
