@@ -35,26 +35,26 @@ namespace lob::memory {
                     table.resize(power_of_2_capacity, {EMPTY, NULL_IDX_32});
                 }
 
-                inline void insert(uint64_t key, uint32_t val) {
-                    size_t key = hash(key);
+                inline void insert(uint64_t order_id, uint32_t val) {
+                    size_t key = hash(order_id);
                     while (table[key].order_id != EMPTY && table[key].order_id != TOMBSTONE) {
-                        if (table[key].order_id == key) {
+                        if (table[key].order_id == order_id) {
                             table[key].pool_idx = val;
                             return;
                         }
                         key = (key + 1) & mask;
                     }
 
-                    table[key].order_id = key;
+                    table[key].order_id = order_id;
                     table[key].pool_idx = val;
 
                 }
 
-                inline void remove(uint64_t key)  {
+                inline void remove(uint64_t order_id)  {
 
-                    size_t key = hash(key);
+                    size_t key = hash(order_id);
                     while (table[key].order_id != EMPTY && table[key].order_id != TOMBSTONE) {
-                        if (table[key].order_id == key) {
+                        if (table[key].order_id == order_id) {
                             table[key].order_id = TOMBSTONE;
                             return;
                         }
@@ -63,11 +63,11 @@ namespace lob::memory {
                 }
 
 
-                    inline uint32_t get(uint64_t key) {
+                    inline uint32_t get(uint64_t order_id) {
 
-                        size_t key = hash(key);
+                        size_t key = hash(order_id);
                         while (table[key].order_id != EMPTY && table[key].order_id != TOMBSTONE) {
-                            if (table[key].order_id == key) {
+                            if (table[key].order_id == order_id) {
                                 return table[key].pool_idx;
                             }
                          key = (key + 1) & mask;

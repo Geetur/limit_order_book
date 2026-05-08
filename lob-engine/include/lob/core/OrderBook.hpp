@@ -60,6 +60,28 @@ namespace lob::core {
                 }
 
             }
+
+            inline void remove_order(uint64_t order_id, lob::memory::OrderPool& pool) {
+
+                uint32_t to_remove_idx = order_map.get(order_id);
+
+                // dosent exist
+                if (to_remove_idx == NULL_IDX_32) {
+                    return;
+                }
+
+                Order& to_remove_order = pool.get(to_remove_idx);
+                if (to_remove_order.is_buy) {
+                    bids[to_remove_order.price].remove_order(to_remove_idx, pool);
+                }
+                else {
+                    asks[to_remove_order.price].remove_order(to_remove_idx, pool);
+                }
+
+                order_map.remove(to_remove_order.id);
+                pool.deallocate(to_remove_idx);
+
+            }
         
         private: 
 
@@ -207,26 +229,5 @@ namespace lob::core {
                     pool.deallocate(incoming_idx);
             }
         }
-    inline void process_remove(uint64_t order_id, lob::memory::OrderPool& pool) {
-
-        uint32_t to_remove_idx = order_map.get(order_id);
-
-        // dosent exist
-        if (to_remove_idx == NULL_IDX_32) {
-            return;
-        }
-
-        Order& to_remove_order = pool.get(to_remove_idx);
-        if (to_remove_order.is_buy) {
-            bids[to_remove_order.price].remove_order(to_remove_idx, pool);
-        }
-        else {
-            asks[to_remove_order.price].remove_order(to_remove_idx, pool);
-        }
-
-        order_map.remove(to_remove_order.id);
-        pool.deallocate(to_remove_idx);
-
-    }
     };
 }
